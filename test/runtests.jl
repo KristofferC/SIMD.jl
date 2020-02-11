@@ -126,6 +126,14 @@ llvm_ir(f, args) = sprint(code_llvm, f, Base.typesof(args...))
                 end
             end
         end
+
+        @test Tuple(V8I32(v8i32)^0) === v8i32.^0
+        @test Tuple(V8I32(v8i32)^1) === v8i32.^1
+        @test Tuple(V8I32(v8i32)^2) === v8i32.^2
+        @test Tuple(V8I32(v8i32)^3) === v8i32.^3
+        @test Tuple(V8I32(v8i32)^7) === v8i32.^7
+        x = 7
+        @test Tuple(V8I32(v8i32)^x) === v8i32.^x
     end
 
     @testset "Floating point arithmetic functions" begin
@@ -306,9 +314,9 @@ llvm_ir(f, args) = sprint(code_llvm, f, Base.typesof(args...))
             @test vload(V8I32, arri32, i) === V8I32(ntuple(j->i+j-1, L8))
         end
         for i in 1:L8:length(arri32)-(L8-1)
-            # @test vloada(V8I32, arri32, i) === V8I32(ntuple(j->i+j-1, L8))
+            @test vloada(V8I32, arri32, i) === V8I32(ntuple(j->i+j-1, L8))
         end
-        # vstorea(V8I32(0), arri32, 1)
+        vstorea(V8I32(0), arri32, 1)
         vstore(V8I32(0), arri32, 1)
         vstore(V8I32(1), arri32, 2)
         for i in 1:length(arri32)
@@ -320,9 +328,9 @@ llvm_ir(f, args) = sprint(code_llvm, f, Base.typesof(args...))
             @test vload(V4F64, arrf64, i) === V4F64(ntuple(j->i+j-1, L4))
         end
         for i in 1:4:length(arrf64)-(L4-1)
-            # @test vloada(V4F64, arrf64, i) === V4F64(ntuple(j->i+j-1, L4))
+            @test vloada(V4F64, arrf64, i) === V4F64(ntuple(j->i+j-1, L4))
         end
-        # vstorea(V4F64(0), arrf64, 1)
+        vstorea(V4F64(0), arrf64, 1)
         vstore(V4F64(0), arrf64, 1)
         vstore(V4F64(1), arrf64, 2)
         for i in 1:length(arrf64)
@@ -337,7 +345,7 @@ llvm_ir(f, args) = sprint(code_llvm, f, Base.typesof(args...))
 
             idx = Vec(Tuple(idxarr))
             @test vgather(arr, idx) === convert(VT, idx)
-            # @test vgathera(arr, idx) === convert(VT, idx)
+            @test vgathera(arr, idx) === convert(VT, idx)
             @test arr[idx] === convert(VT, idx)
 
             # Masked gather
@@ -346,7 +354,7 @@ llvm_ir(f, args) = sprint(code_llvm, f, Base.typesof(args...))
                 maskarr[i] = true
                 mask = Vec(Tuple(maskarr))
                 @test vgather(arr, idx, mask) === VT(Tuple(idxarr .* maskarr))
-                # @test vgathera(arr, idx, mask) === VT(Tuple(idxarr .* maskarr))
+                @test vgathera(arr, idx, mask) === VT(Tuple(idxarr .* maskarr))
                 # @test arr[idx, mask] === VT(Tuple(idxarr .* maskarr))
             end
 
@@ -369,7 +377,7 @@ llvm_ir(f, args) = sprint(code_llvm, f, Base.typesof(args...))
                 mask = Vec(Tuple(maskarr))
                 vscatter(v, fill!(arr, 0), idx, mask)
                 @test arr[idxarr] == varr .* maskarr
-                # vscattera(v, fill!(arr, 0), idx, mask)
+                vscattera(v, fill!(arr, 0), idx, mask)
                 @test arr[idxarr] == varr .* maskarr
                 fill!(arr, 0)
                 # arr[idx, mask] = v
@@ -424,7 +432,7 @@ llvm_ir(f, args) = sprint(code_llvm, f, Base.typesof(args...))
                 idx = VecRange{length(VT)}(1)
                 @test mat[idx, 1] === VT(Tuple(1:length(VT)))
                 @test mat[idx, 2] === VT(Tuple(1:length(VT)))
-                if mat isa SIMD.SIMDVec.FastContiguousArray
+                if mat isa SIMD.FastContiguousArray
                     @test mat[idx] === VT(Tuple(1:length(VT)))
                 else
                     err = try

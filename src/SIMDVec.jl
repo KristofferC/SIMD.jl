@@ -1,12 +1,3 @@
-# Imitate the API in SIMD.jl
-
-module SIMDVec
-
-import ..SIMD: LLVM, VE, LVec, ScalarTypes, IntegerTypes, IntTypes, UIntTypes, FloatingTypes
-using Base: @propagate_inbounds
-
-    export Vec, vload, vstore, vgather, vscatter, vload, shufflevector, vifelse, valloc
-
 struct Vec{N, T <: ScalarTypes}
     data::LVec{N, T}
 end
@@ -15,6 +6,8 @@ end
 @inline Vec(v::NTuple{N, T}) where {N, T <: ScalarTypes} = Vec(VE.(v))
 @inline Vec(v::Vararg{T, N}) where {N, T <: ScalarTypes} = Vec(v)
 @inline Vec(v::Vec) = v
+# Numbers defines this and it is needed in power_by_squaring...
+Base.copy(v::Vec) = v
 
 # No throwing versions of convert
 @inline _unsafe_convert(::Type{T}, v) where {T <: IntegerTypes} = v % T
@@ -26,8 +19,6 @@ end
 @inline Vec{N, T}(v::Vec{N, T}) where {N, T<:FloatingTypes} = v
 @inline Vec{N, T1}(v::T2) where {N, T1<:ScalarTypes, T2<:ScalarTypes} = constantvector(v, Vec{N, T1})
 @inline Vec{N, T1}(v::Vec{N, T2}) where {N, T1<:IntegerTypes, T2<:IntegerTypes} = convert(Vec{N, T1}, v)
-
-include("arrayops.jl")
 
 @inline Base.convert(::Type{Vec{N,T}}, v::Vec{N,T}) where {N,T} = v
 @inline function Base.convert(::Type{Vec{N, T1}}, v::Vec{N, T2}) where {T1, T2, N}
@@ -237,10 +228,14 @@ end
 # Pow
 @inline Base.:^(x::Vec{N,T}, y::IntegerTypes) where {N,T<:FloatingTypes} =
     Vec(LLVM.powi(x.data, y))
-@inline Base.literal_pow(::typeof(^), x::Vec{Any, <:FloatingTypes}, ::Val{0}) = one(typeof(x))
-@inline Base.literal_pow(::typeof(^), x::Vec{Any, <:FloatingTypes}, ::Val{1}) = x
-@inline Base.literal_pow(::typeof(^), x::Vec{Any, <:FloatingTypes}, ::Val{2}) = x*x
-@inline Base.literal_pow(::typeof(^), x::Vec{Any, <:FloatingTypes}, ::Val{3}) = x*x*x
+@inline Base.:^(x::Vec{N,T}, y::IntegerTypes) where {N,T<:IntegerTypes} =
+    Base.power_by_squaring(x, y)
+
+@inline Base.literal_pow(::typeof(^), x::Vec{Any, <:ScalarTypes}, ::Val{0}) = one(typeof(x))
+@inline Base.literal_pow(::typeof(^), x::Vec{Any, <:ScalarTypes}, ::Val{1}) = x
+@inline Base.literal_pow(::typeof(^), x::Vec{Any, <:ScalarTypes}, ::Val{2}) = x*x
+@inline Base.literal_pow(::typeof(^), x::Vec{Any, <:ScalarTypes}, ::Val{3}) = x*x*x
+@inline Base.literal_pow(::typeof(^), x::Vec{Any, <:ScalarTypes}, ::Val{i}) where {i} = x^i
 
 # Sign
 @inline Base.flipsign(v1::Vec{N,T}, v2::Vec{N,T}) where {N,T} =
@@ -311,9 +306,9 @@ for (op, constraint) in [BINARY_OPS;
         (:flipsign , ScalarTypes)
         (:copysign , ScalarTypes)
         (:signbit  , ScalarTypes)
+        (:^        , ScalarTypes)
         (:min      , IntegerTypes)
         (:max      , IntegerTypes)
-        (:^        , IntegerTypes)
         (:<<       , IntegerTypes)
         (:>>       , IntegerTypes)
         (:>>>      , IntegerTypes)
@@ -401,6 +396,4 @@ Base.reduce(F::Any, v::Vec) = error("reduction not defined for SIMD.Vec on $F")
 end
 @inline function shufflevector(x::Vec{N, T}, y::Vec{N, T}, ::Val{I}) where {N, T, I}
     Vec(LLVM.shufflevector(x.data, y.data, Val(I)))
-end
-
 end

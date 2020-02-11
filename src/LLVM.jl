@@ -246,11 +246,15 @@ end
 # Load / store #
 ################
 
-# TODO: Alignment
-@generated function load(x::Type{LVec{N, T}}, ptr::Ptr{T}) where {N, T}
+# These alignment numbers feels a bit dubious
+align_str(align, N, T) = string("align ", align ? N * sizeof(T) : sizeof(T))
+temporal_str(temporal) = temporal ? ", !nontemporal !{i32 1}" : ""
+
+@generated function load(x::Type{LVec{N, T}}, ptr::Ptr{T},
+                         ::Val{Al}=Val(false), ::Val{Te}=Val(false)) where {N, T, Al, Te}
     s = """
     %ptr = inttoptr $(d[Int]) %0 to <$N x $(d[T])>*
-    %res = load <$N x $(d[T])>, <$N x $(d[T])>* %ptr, align 8
+    %res = load <$N x $(d[T])>, <$N x $(d[T])>* %ptr, $(align_str(Al, N, T)) $(temporal_str(Te))
     ret <$N x $(d[T])> %res
     """
     return :(
@@ -259,13 +263,15 @@ end
     )
 end
 
-@generated function store(x::LVec{N, T}, ptr::Ptr{T}) where {N, T}
+@generated function store(x::LVec{N, T}, ptr::Ptr{T},
+                          ::Val{Al}=Val(false), ::Val{Te}=Val(false)) where {N, T, Al, Te}
     s = """
     %ptr = inttoptr $(d[Int]) %1 to <$N x $(d[T])>*
-    store <$N x $(d[T])> %0, <$N x $(d[T])>* %ptr, align 8
+    store <$N x $(d[T])> %0, <$N x $(d[T])>* %ptr, $(align_str(Al, N, T)) $(temporal_str(Te))
     ret void
     """
     return :(
+
         $(Expr(:meta, :inline));
         Base.llvmcall($s, Cvoid, Tuple{LVec{N, T}, Ptr{T}}, x, ptr)
     )
