@@ -66,15 +66,12 @@ end
 @inline Base.:+(j::Integer, idx::VecRange{N}) where N = VecRange{N}(idx.i + j)
 @inline Base.:-(idx::VecRange{N}, j::Integer) where N = VecRange{N}(idx.i - j)
 
-
-@inline vload(::Type{Vec{N, T}}, ptr::Ptr{T},
-        ::Val{Aligned}=Val(false), ::Val{Nontemporal}=Val(false)) where {N, T, Aligned, Nontemporal} =
-    Vec(LLVM.load(LLVM.LVec{N, T}, ptr, Val(Aligned), Val(Nontemporal)))
 @inline function vload(::Type{Vec{N, T}}, a::FastContiguousArray{T,1}, i::Integer,
                        ::Val{Aligned}=Val(false), ::Val{Nontemporal}=Val(false)) where {N, T, Aligned, Nontemporal}
     @boundscheck checkbounds(a, i + N - 1)
     GC.@preserve a begin
-        return vload(Vec{N, T}, pointer(a, i))
+        ptr = pointer(a, i)
+        return Vec(LLVM.load(LLVM.LVec{N, T}, ptr, Val(Aligned), Val(Nontemporal)))
     end
 end
 @inline vloada(::Type{T}, a, i) where {T<:Vec} = vload(T, a, i, Val(true))
@@ -82,15 +79,12 @@ end
 @propagate_inbounds Base.getindex(a::FastContiguousArray{T,1}, idx::VecRange{N}) where {N,T} =
     vload(Vec{N,T}, a, idx.i)
 
-
-@inline vstore(x::Vec{N, T}, ptr::Ptr{T},
-               ::Val{Aligned}=Val(false), ::Val{Nontemporal}=Val(false)) where {N, T, Aligned, Nontemporal} =
-    LLVM.store(x.data, ptr, Val(Aligned), Val(Nontemporal))
 @inline function vstore(x::Vec{N, T}, a::FastContiguousArray{T,1}, i::Integer,
                ::Val{Aligned}=Val(false), ::Val{Nontemporal}=Val(false)) where {N, T, Aligned, Nontemporal}
     @boundscheck checkbounds(a, i + N - 1)
     GC.@preserve a begin
-        vstore(x, pointer(a, i), Val(Aligned), Val(Nontemporal))
+        ptr = pointer(a, i)
+        LLVM.store(x.data, ptr, Val(Aligned), Val(Nontemporal))
     end
     return a
 end
@@ -135,7 +129,8 @@ end
 # see https://github.com/JuliaLang/julia/issues/30411,
 # therefore use @propagate_inbounds
 @propagate_inbounds function vgather(a::FastContiguousArray{T,1}, idx::Vec{N, Int},
-                                     mask::Vec{N,Bool}=one(Vec{N,Bool})) where {N, T<:ScalarTypes}
+                                     mask::Vec{N,Bool}=one(Vec{N,Bool}),
+                                     ::Val{Aligned}=Val(false)) where {N, T<:ScalarTypes, Aligned}
     @boundscheck for i in 1:N
         checkbounds(a, @inbounds idx[i])
     end
@@ -144,11 +139,15 @@ end
         return Vec(LLVM.maskedgather(LLVM.LVec{N, T}, ptrs.data, mask.data))
     end
 end
+vgathera(a, idx, mask) = vgather(a, idx, mask, Val(true))
+vgathera(a, idx::Vec{N}) where {N} = vgather(a, idx, one(Vec{N,Bool}), Val(true))
+
 @propagate_inbounds Base.getindex(a::FastContiguousArray{T,1}, idx::Vec{N,Int}) where {N,T} =
     vgather(a, idx)
 
-@propagate_inbounds function vscatter(x::Vec{N,T}, a::FastContiguousArray{T,1},
-        idx::Vec{N, Int}, mask::Vec{N,Bool}=one(Vec{N, Bool})) where {N, T<:ScalarTypes}
+@propagate_inbounds function vscatter(x::Vec{N,T}, a::FastContiguousArray{T,1}, idx::Vec{N, Int},
+                                      mask::Vec{N,Bool}=one(Vec{N, Bool}),
+                                      ::Val{Aligned}=Val(false)) where {N, T<:ScalarTypes, Aligned}
     @boundscheck for i in 1:N
         checkbounds(a, @inbounds idx[i])
     end
@@ -158,5 +157,8 @@ end
     end
     return
 end
+vscattera(x, a, idx, mask) = vscatter(x, a, idx, mask, Val(true))
+vscattera(x, a, idx::Vec{N}) where {N}  = vscatter(x, a, idx, one(Vec{N,Bool}), Val(true))
+
 @propagate_inbounds Base.setindex!(a::FastContiguousArray{T,1}, v::Vec{N,T}, idx::Vec{N,Int}) where {N, T} =
     vscatter(v, a, idx)

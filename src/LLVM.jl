@@ -247,14 +247,14 @@ end
 ################
 
 # These alignment numbers feels a bit dubious
-align_str(align, N, T) = string("align ", align ? N * sizeof(T) : sizeof(T))
+n_align(align, N, T) = align ? N * sizeof(T) : sizeof(T)
 temporal_str(temporal) = temporal ? ", !nontemporal !{i32 1}" : ""
 
 @generated function load(x::Type{LVec{N, T}}, ptr::Ptr{T},
                          ::Val{Al}=Val(false), ::Val{Te}=Val(false)) where {N, T, Al, Te}
     s = """
     %ptr = inttoptr $(d[Int]) %0 to <$N x $(d[T])>*
-    %res = load <$N x $(d[T])>, <$N x $(d[T])>* %ptr, $(align_str(Al, N, T)) $(temporal_str(Te))
+    %res = load <$N x $(d[T])>, <$N x $(d[T])>* %ptr, align $(n_align(Al, N, T)) $(temporal_str(Te))
     ret <$N x $(d[T])> %res
     """
     return :(
@@ -267,7 +267,7 @@ end
                           ::Val{Al}=Val(false), ::Val{Te}=Val(false)) where {N, T, Al, Te}
     s = """
     %ptr = inttoptr $(d[Int]) %1 to <$N x $(d[T])>*
-    store <$N x $(d[T])> %0, <$N x $(d[T])>* %ptr, $(align_str(Al, N, T)) $(temporal_str(Te))
+    store <$N x $(d[T])> %0, <$N x $(d[T])>* %ptr, align $(n_align(Al, N, T)) $(temporal_str(Te))
     ret void
     """
     return :(
@@ -282,14 +282,15 @@ end
 # Gather / Scatter #
 ####################
 
-@generated function maskedgather(::Type{LVec{N, T}}, ptrs::Union{LVec{N, Ptr{T}}, LVec{N, Int}}, mask::LVec{N,Bool}) where {N, T}
+@generated function maskedgather(::Type{LVec{N, T}}, ptrs::Union{LVec{N, Ptr{T}}, LVec{N, Int}},
+                                 mask::LVec{N,Bool}, ::Val{Al}=Val(false)) where {N, T, Al}
     # TODO: Allow setting the passthru
     decl = "declare <$N x $(d[T])> @llvm.masked.gather.$(suffix(N, T))(<$N x $(d[T])*>, i32, <$N x i1>, <$N x $(d[T])>)"
 
     s = """
     %cond = trunc <$(N) x i8> %1 to <$(N) x i1>
     %ptrs = inttoptr <$N x $(d[Int])> %0 to <$N x $(d[T])*>
-    %res = call <$N x $(d[T])> @llvm.masked.gather.$(suffix(N, T))(<$N x $(d[T])*> %ptrs, i32 8, <$N x i1> %cond, <$N x $(d[T])> zeroinitializer)
+    %res = call <$N x $(d[T])> @llvm.masked.gather.$(suffix(N, T))(<$N x $(d[T])*> %ptrs, i32 $(n_align(Al, N, T)), <$N x i1> %cond, <$N x $(d[T])> zeroinitializer)
     ret <$N x $(d[T])> %res
     """
     return :(
@@ -298,13 +299,15 @@ end
     )
 end
 
-@generated function maskedscatter(x::LVec{N, T}, ptrs::Union{LVec{N, Int}, LVec{N, Ptr{T}}}, mask::LVec{N, Bool}) where {N, T}
+@generated function maskedscatter(x::LVec{N, T}, ptrs::Union{LVec{N, Int}, LVec{N, Ptr{T}}},
+                                  mask::LVec{N,Bool}, ::Val{Al}=Val(false)) where {N, T, Al}
+
     decl = "declare <$N x $(d[T])> @llvm.masked.scatter.$(suffix(N, T))(<$N x $(d[T])>, <$N x $(d[T])*>, i32, <$N x i1>)"
 
     s = """
     %cond = trunc <$(N) x i8> %2 to <$(N) x i1>
     %ptrs = inttoptr <$N x $(d[Int])> %1 to <$N x $(d[T])*>
-    call <$N x $(d[T])> @llvm.masked.scatter.$(suffix(N, T))(<$N x $(d[T])> %0, <$N x $(d[T])*> %ptrs, i32 8, <$N x i1> %cond)
+    call <$N x $(d[T])> @llvm.masked.scatter.$(suffix(N, T))(<$N x $(d[T])> %0, <$N x $(d[T])*> %ptrs, i32 $(n_align(Al, N, T)), <$N x i1> %cond)
     ret void
     """
     return :(

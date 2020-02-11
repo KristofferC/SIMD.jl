@@ -2,8 +2,8 @@ module SIMD
 
 using Base: @propagate_inbounds
 
-export Vec, vload, vloada, vloadnt, vstore, vstorea, vstorent, vgather,
-       vscatter, shufflevector, vifelse, valloc, VecRange
+export Vec, vload, vloada, vloadnt, vstore, vstorea, vstorent, vgather, vgathera,
+       vscatter, vscattera, shufflevector, vifelse, valloc, VecRange
 
 const VE         = Base.VecElement
 const LVec{N, T} = NTuple{N, VE{T}}
