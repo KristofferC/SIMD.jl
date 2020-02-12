@@ -22,8 +22,8 @@ const d = Dict{DataType, String}(
     #Float16     => "half",
     Float32      => "float",
     Float64      => "double",
-    Ptr{Float64} => "i64"
 )
+
 
 # TODO: Clean up
 suffix(N::Integer, ::Type{Ptr{T}}) where {T} = "v$(N)p0$(T<:IntegerTypes ? "i" : "f")$(8*sizeof(T))"
@@ -282,6 +282,7 @@ end
 # Gather / Scatter #
 ####################
 
+# TODO: Only take pointers here...
 @generated function maskedgather(::Type{LVec{N, T}}, ptrs::Union{LVec{N, Ptr{T}}, LVec{N, Int}},
                                  mask::LVec{N,Bool}, ::Val{Al}=Val(false)) where {N, T, Al}
     # TODO: Allow setting the passthru

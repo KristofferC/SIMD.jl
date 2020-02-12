@@ -301,6 +301,23 @@ for v in (:<<, :>>, :>>>)
     end
 end
 
+# Poitner arithmetics between Ptr, IntegerTypes, and vectors of them.
+
+#=
+for op in (:+, :-)
+    @eval begin
+        @inline Base.$op(v1::Vec{N,<:Ptr}, v2::Vec{N,<:IntegerTypes}) where {N} =
+            llvmwrap(Val($(QuoteNode(op))), v1, v2)
+        @inline Base.$op(v1::Vec{N,<:IntegerTypes}, v2::Vec{N,<:Ptr}) where {N} =
+            llvmwrap(Val($(QuoteNode(op))), v1, v2)
+        @inline Base.$op(s1::P, v2::Vec{N,<:IntegerTypes}) where {N,P<:Ptr} =
+            $op(Vec{N,P}(s1), v2)
+        @inline Base.$op(v1::Vec{N,<:IntegerTypes}, s2::P) where {N,P<:Ptr} =
+            $op(v1, Vec{N,P}(s2))
+    end
+end
+=#
+
 # Vectorize binary functions
 for (op, constraint) in [BINARY_OPS;
         (:flipsign , ScalarTypes)

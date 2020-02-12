@@ -355,7 +355,7 @@ llvm_ir(f, args) = sprint(code_llvm, f, Base.typesof(args...))
                 mask = Vec(Tuple(maskarr))
                 @test vgather(arr, idx, mask) === VT(Tuple(idxarr .* maskarr))
                 @test vgathera(arr, idx, mask) === VT(Tuple(idxarr .* maskarr))
-                # @test arr[idx, mask] === VT(Tuple(idxarr .* maskarr))
+                @test arr[idx, mask] === VT(Tuple(idxarr .* maskarr))
             end
 
             # Scatter
@@ -364,7 +364,7 @@ llvm_ir(f, args) = sprint(code_llvm, f, Base.typesof(args...))
 
             vscatter(v, fill!(arr, 0), idx)
             @test arr[idxarr] == varr
-            # vscattera(v, fill!(arr, 0), idx)
+            vscattera(v, fill!(arr, 0), idx)
             @test arr[idxarr] == varr
             fill!(arr, 0)
             arr[idx] = v
@@ -380,13 +380,12 @@ llvm_ir(f, args) = sprint(code_llvm, f, Base.typesof(args...))
                 vscattera(v, fill!(arr, 0), idx, mask)
                 @test arr[idxarr] == varr .* maskarr
                 fill!(arr, 0)
-                # arr[idx, mask] = v
-                # @test arr[idxarr] == varr .* maskarr
+                arr[idx, mask] = v
+                @test arr[idxarr] == varr .* maskarr
             end
         end
     end
 
-    #=
     @testset "Index-based load/store" begin
         for (arr, VT) in [(arri32, V8I32), (arrf64, V4F64)]
             @testset "Vector ($VT)" begin
@@ -539,7 +538,6 @@ llvm_ir(f, args) = sprint(code_llvm, f, Base.typesof(args...))
             end
         end
     end
-    =#
 
     @testset "Real-world examples" begin
 
@@ -602,7 +600,6 @@ llvm_ir(f, args) = sprint(code_llvm, f, Base.typesof(args...))
             end
         end
 
-        #=
         let xs = valloc(Float64, 4, 13) do i i end,
             ys = valloc(Float64, 4, 13) do i 1 end
             vadd_masked!(xs, ys, V4F64)
@@ -638,7 +635,6 @@ llvm_ir(f, args) = sprint(code_llvm, f, Base.typesof(args...))
             @test occursin(" fadd <4 x double>", ir)
             @test occursin(r"( shufflevector <4 x double>.*){2}"s, ir)
         end
-        =#
     end
 
     @testset "Vector shuffles" begin
