@@ -11,7 +11,6 @@ const LVec{N, T} = NTuple{N, VE{T}}
 const IntTypes      = Union{Int8, Int16, Int32, Int64, Int128, Bool}
 const UIntTypes     = Union{UInt8, UInt16, UInt32, UInt64, UInt128}
 const IntegerTypes  = Union{Bool, IntTypes, UIntTypes}
-#const IndexTypes    = Union{Ptr, IntegerTypes}
 const FloatingTypes = Union{Float32, Float64} # Float16 support is non-native in Julia and gets passed as an i16
 const ScalarTypes   = Union{IntegerTypes, FloatingTypes}
 const VecTypes      = Union{ScalarTypes, Ptr}

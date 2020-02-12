@@ -399,7 +399,7 @@ llvm_ir(f, args) = sprint(code_llvm, f, Base.typesof(args...))
                 mask = Vec(Tuple(maskarr))
                 varr = zeros(length(VT))
                 varr[1] = 1
-                # @test arr[idx, mask] === VT(Tuple(varr))
+                @test arr[idx, mask] === VT(Tuple(varr))
 
                 @test_throws ArgumentError arr[idx, 1]
                 @test_throws ArgumentError arr[idx, 1, mask]
@@ -423,12 +423,13 @@ llvm_ir(f, args) = sprint(code_llvm, f, Base.typesof(args...))
             end
 
             arr .= 1:length(arr)
+            idx = VecRange{length(VT)}(1)
+
             @testset "$name" for (name, mat) in [
                         ("Matrix ($VT)", repeat(arr, outer=(1, 3))),
                         ("Matrix ($VT) with non-strided row",
                          view(repeat(arr, outer=(1, 5)), :, [2, 1, 5])),
                     ]
-                idx = VecRange{length(VT)}(1)
                 @test mat[idx, 1] === VT(Tuple(1:length(VT)))
                 @test mat[idx, 2] === VT(Tuple(1:length(VT)))
                 if mat isa SIMD.FastContiguousArray
@@ -633,7 +634,7 @@ llvm_ir(f, args) = sprint(code_llvm, f, Base.typesof(args...))
             ir = llvm_ir(vsum_masked, (xs, V4F64))
             @test occursin("masked.load.v4f64", ir)
             @test occursin(" fadd <4 x double>", ir)
-            @test occursin(r"( shufflevector <4 x double>.*){2}"s, ir)
+            # @test occursin(r"( shufflevector <4 x double>.*){2}"s, ir)
         end
     end
 

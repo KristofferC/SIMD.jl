@@ -39,40 +39,46 @@ FastContiguousArray{T,N} = Union{DenseArray{T,N}, Base.FastContiguousSubArray{T,
 # https://github.com/JuliaArrays/MappedArrays.jl/pull/24#issuecomment-460568978
 
 # vload
-@inline vload(::Type{Vec{N, T}}, ptr::Ptr{T}, i::Integer,
-                       ::Val{Aligned}, ::Val{Nontemporal}) where {N, T, Aligned, Nontemporal} =
-    Vec(LLVM.load(LLVM.LVec{N, T}, ptr, Val(Aligned), Val(Nontemporal)))
+@inline function vload(::Type{Vec{N, T}}, ptr::Ptr{T}, mask::Union{Nothing, Vec{N, Bool}}=nothing,
+                       ::Val{Aligned}=Val(false), ::Val{Nontemporal}=Val(false)) where {N, T, Aligned, Nontemporal}
+    if mask === nothing
+        Vec(LLVM.load(LLVM.LVec{N, T}, ptr, Val(Aligned), Val(Nontemporal)))
+    else
+        Vec(LLVM.maskedload(ptr, mask.data, Val(Aligned), Val(Nontemporal)))
+    end
+end
 
-@inline function vload(::Type{Vec{N, T}}, a::FastContiguousArray{T,1}, i::Integer,
+@inline function vload(::Type{Vec{N, T}}, a::FastContiguousArray{T,1}, i::Integer, mask=nothing,
                        ::Val{Aligned}=Val(false), ::Val{Nontemporal}=Val(false)) where {N, T, Aligned, Nontemporal}
     @boundscheck checkbounds(a, i + N - 1)
     GC.@preserve a begin
         ptr = pointer(a, i)
-        vload(Vec{N, T}, ptr, i, Val(Aligned), Val(Nontemporal))
+        vload(Vec{N, T}, ptr, mask, Val(Aligned), Val(Nontemporal))
     end
 end
-@propagate_inbounds vloada(::Type{T}, a, i) where {T<:Vec} = vload(T, a, i, Val(true))
-@propagate_inbounds vloadnt(::Type{T}, a, i) where {T<:Vec} = vload(T, a, i, Val(true), Val(true))
-#@propagate_inbounds Base.getindex(a::FastContiguousArray{T,1}, idx::VecRange{N}) where {N,T} =
-#    vload(Vec{N,T}, a, idx.i)
+@propagate_inbounds vloada(::Type{T}, a, i, mask=nothing) where {T<:Vec} = vload(T, a, i, mask, Val(true))
+@propagate_inbounds vloadnt(::Type{T}, a, i, mask=nothing) where {T<:Vec} = vload(T, a, i, mask, Val(true), Val(true))
 
 # vstore
-@inline vstore(x::Vec{N, T}, ptr::Ptr{T}, i::Integer,
-                        ::Val{Aligned}, ::Val{Nontemporal}) where {N, T, Aligned, Nontemporal} =
-    LLVM.store(x.data, ptr, Val(Aligned), Val(Nontemporal))
-@inline function vstore(x::Vec{N, T}, a::FastContiguousArray{T,1}, i::Integer,
+@inline function vstore(x::Vec{N, T}, ptr::Ptr{T}, mask::Union{Nothing, Vec{N, Bool}}=nothing,
+                       ::Val{Aligned}=Val(false), ::Val{Nontemporal}=Val(false)) where {N, T, Aligned, Nontemporal}
+    if mask === nothing
+        LLVM.store(x.data, ptr, Val(Aligned), Val(Nontemporal))
+    else
+        LLVM.maskedstore(x.data, ptr, mask.data, Val(Aligned), Val(Nontemporal))
+    end
+end
+@inline function vstore(x::Vec{N, T}, a::FastContiguousArray{T,1}, i::Integer, mask=nothing,
                ::Val{Aligned}=Val(false), ::Val{Nontemporal}=Val(false)) where {N, T, Aligned, Nontemporal}
     @boundscheck checkbounds(a, i + N - 1)
     GC.@preserve a begin
         ptr = pointer(a, i)
-        vstore(x, ptr, i, Val(Aligned), Val(Nontemporal))
+        vstore(x, ptr, mask, Val(Aligned), Val(Nontemporal))
     end
     return a
 end
-@propagate_inbounds vstorea(x::Vec, a, i) = vstore(x, a, i, Val(true))
-@propagate_inbounds vstorent(x::Vec, a, i) = vstore(x, a, i, Val(true), Val(true))
-#@propagate_inbounds Base.setindex!(a::FastContiguousArray{T,1}, v::Vec{N, T}, idx::VecRange{N}) where {N,T} =
-#    vstore(v, a, idx.i)
+@propagate_inbounds vstorea(x::Vec, a, i, mask=nothing) = vstore(x, a, i, nothing, Val(true))
+@propagate_inbounds vstorent(x::Vec, a, i, mask=nothing) = vstore(x, a, i, nothing, Val(true), Val(true))
 
 function valloc(::Type{T}, N::Int, sz::Int) where T
     @assert N > 0
@@ -249,7 +255,7 @@ Base.@propagate_inbounds function Base.getindex(
         arr::ContiguousArray{T}, idx::VecRange{N},
         args::Vararg{Union{Integer,Vec{N,Bool}}}) where {N,T}
     I, mask = _preprocessindices(arr, idx, args)
-    return vload(Vec{N,T}, _pointer(arr, idx.i, I), Val(false))
+    return vload(Vec{N,T}, _pointer(arr, idx.i, I), mask)
 end
 
 Base.@propagate_inbounds function Base.setindex!(
