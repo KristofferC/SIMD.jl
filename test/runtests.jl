@@ -11,10 +11,8 @@ Get LLVM IR of `f(args...)` as a string.
 """
 llvm_ir(f, args) = sprint(code_llvm, f, Base.typesof(args...))
 
-
-    # The vector we are testing. Ideally, we should be able to use any vector size
-    # anywhere, but LLVM codegen bugs prevent us from doing so -- thus we make this
-    # a parameter.
+@testset "SIMD" begin
+    # The vector we are testing.
     global const nbytes = 32
 
     global const L8 = nbytes÷4
@@ -423,13 +421,13 @@ llvm_ir(f, args) = sprint(code_llvm, f, Base.typesof(args...))
             end
 
             arr .= 1:length(arr)
-            idx = VecRange{length(VT)}(1)
 
             @testset "$name" for (name, mat) in [
                         ("Matrix ($VT)", repeat(arr, outer=(1, 3))),
                         ("Matrix ($VT) with non-strided row",
                          view(repeat(arr, outer=(1, 5)), :, [2, 1, 5])),
                     ]
+                idx = VecRange{length(VT)}(1)
                 @test mat[idx, 1] === VT(Tuple(1:length(VT)))
                 @test mat[idx, 2] === VT(Tuple(1:length(VT)))
                 if mat isa SIMD.FastContiguousArray
@@ -504,7 +502,7 @@ llvm_ir(f, args) = sprint(code_llvm, f, Base.typesof(args...))
             @testset "3D array ($VT)" begin
                 arr .= 1:length(arr)
                 arr3d = repeat(arr, outer=(1, 3, 5))
-                dx = VecRange{length(VT)}(1)
+                idx = VecRange{length(VT)}(1)
                 @test arr3d[idx, 1, 1] === VT(Tuple(1:length(VT)))
                 @test arr3d[idx, 2, 1] === VT(Tuple(1:length(VT)))
                 @test arr3d[idx, 1, 2] === VT(Tuple(1:length(VT)))
@@ -686,3 +684,4 @@ llvm_ir(f, args) = sprint(code_llvm, f, Base.typesof(args...))
             @test shufflevector(a, b, Val((2,3,4,5))) === Vec{4,Bool}((true,false,false,false))
         end
     end
+end
