@@ -3,7 +3,7 @@ module LLVM
 
 # TODO: fastmath flags
 
-import ..SIMD: VE, LVec, IntegerTypes, IntTypes, UIntTypes, FloatingTypes
+import ..SIMD: VE, LVec, IntegerTypes, IntTypes, UIntTypes, FloatingTypes, ScalarTypes
 
 const d = Dict{DataType, String}(
     Bool         => "i8",
@@ -23,6 +23,13 @@ const d = Dict{DataType, String}(
     Float32      => "float",
     Float64      => "double",
 )
+# Add the Ptr translations
+foreach(x -> (d[Ptr{x}] = d[Int]), collect(keys(d)))
+d[Ptr{Nothing}] = d[Int]
+
+# LT = LLVM Type (scalar and vectors), we keep type names intentionally short
+# to make the signatures smaller
+const LT{T} = Union{LVec{<:Any, T}, T}
 
 
 # TODO: Clean up
@@ -30,13 +37,16 @@ suffix(N::Integer, ::Type{Ptr{T}}) where {T} = "v$(N)p0$(T<:IntegerTypes ? "i" :
 suffix(N::Integer, ::Type{T}) where {T} = "v$(N)$(T<:IntegerTypes ? "i" : "f")$(8*sizeof(T))"
 suffix(::Type{T}) where {T} = "$(T<:IntegerTypes ? "i" : "f")$(8*sizeof(T))"
 llvm_name(llvmf, N, T) = string("llvm", ".", llvmf, ".", suffix(N, T))
-
+llvm_name(llvmf, ::Type{LVec{N, T}}) where {N,T} = string("llvm", ".", llvmf, ".", suffix(N, T))
+llvm_name(llvmf, ::Type{T}) where {T<:ScalarTypes} = string("llvm", ".", llvmf, ".", suffix(T))
+llvm_type(::Type{T}) where {T<:ScalarTypes} = d[T]
+llvm_type(::Type{LVec{N, T}}) where {N,T} = "< $N x $(d[T])>"
 
 ####################
 # Unary operators  #
 ####################
 
-const UNARY_INTRINSICS = [
+const UNARY_INTRINSICS_FLOAT = [
     :sqrt
     :sin
     :cos
@@ -54,53 +64,45 @@ const UNARY_INTRINSICS = [
     :round
 ]
 
-for f in UNARY_INTRINSICS
-    @eval begin
-    @generated function $(f)(x::LVec{N, T}) where {N, T <: FloatingTypes}
-        ff = llvm_name($(QuoteNode(f)), N, T)
-        return :(
-            $(Expr(:meta, :inline));
-            ccall($ff, llvmcall, LVec{N, T}, (LVec{N, T},), x)
-        )
-    end
+const UNARY_INTRINSICS_INT = [
+    :bitreverse
+    :bswap
+    :ctpop
+    :ctlz
+    :cttz
+    :fshl
+    :fshr
+]
+
+for (fs, c) in zip([UNARY_INTRINSICS_FLOAT, UNARY_INTRINSICS_INT], [FloatingTypes, IntegerTypes])
+    for f in fs
+        @eval begin
+            @generated function $(f)(x::T) where T<:LT{<:$c}
+                ff = llvm_name($(QuoteNode(f)), T)
+                return :(
+                    $(Expr(:meta, :inline));
+                    ccall($ff, llvmcall, T, (T,), x)
+                )
+            end
+        end
     end
 end
 
-# fneg
-@generated function fneg(x::LVec{N, T}) where {N, T<:FloatingTypes}
+# fneg (not an intrinsic so cannot use `ccall)
+@generated function fneg(x::T) where T<:LT{<:FloatingTypes}
     s = """
-    %2 = fneg <$(N) x $(d[T])> %0
-    ret <$(N) x $(d[T])> %2
+    %2 = fneg $(llvm_type(T)) %0
+    ret $(llvm_type(T)) %2
     """
     return :(
         $(Expr(:meta, :inline));
-        Base.llvmcall($s, LVec{N, T}, Tuple{LVec{N, T}}, x)
+        Base.llvmcall($s, T, Tuple{T}, x)
     )
 end
 
-const BITMANIPULATION_INTRINSICS = [
-    :bitreverse,
-    :bswap,
-    :ctpop,
-    :ctlz,
-    :cttz,
-    :fshl,
-    :fshr,
-]
-
-for f in BITMANIPULATION_INTRINSICS
-    @eval @generated function $(f)(x::LVec{N, T}) where {N, T <: IntegerTypes}
-        ff = llvm_name($(QuoteNode(f)), N, T)
-        return :(
-            $(Expr(:meta, :inline));
-            ccall($ff, llvmcall, LVec{N, T}, (LVec{N, T},), x)
-        )
-    end
-end
-
 # This is special cased because AFAIU for ~Vec{N, Bool} there is no
-# way to get these -1 passed to LLVM.
-@generated function or(x::LVec{N, T}) where {N, T <: IntegerTypes}
+# way to get these -1 passed to LLVM from Julia.
+@generated function or(x::LVec{N, T}) where {N, T<:IntegerTypes}
     ff = llvm_name(:xor, N, T)
     shfl = join((string(d[T], " ", -1) for i in 1:N), ", ")
     s = """
@@ -134,16 +136,16 @@ const BINARY_OPS = [
 ]
 
 for fs in BINARY_OPS
-    for (f, constraint) in zip(fs, (IntTypes, UIntTypes, FloatingTypes))
-        @eval @generated function $f(x::LVec{N, T}, y::LVec{N, T}) where {N, T <: $constraint}
+    for (f, c) in zip(fs, (IntTypes, UIntTypes, FloatingTypes))
+        @eval @generated function $f(x::T, y::T) where T<:LT{<:$c}
             ff = $(QuoteNode(f))
             s = """
-            %3 = $ff <$(N) x $(d[T])> %0, %1
-            ret <$(N) x $(d[T])> %3
+            %3 = $ff $(llvm_type(T)) %0, %1
+            ret $(llvm_type(T)) %3
             """
             return :(
                 $(Expr(:meta, :inline));
-                Base.llvmcall($s, LVec{N, T}, Tuple{LVec{N, T}, LVec{N, T}}, x, y)
+                Base.llvmcall($s, T, Tuple{T, T}, x, y)
             )
         end
     end
@@ -165,22 +167,22 @@ const BINARY_FLOAT_INTRINSICS = [
 ]
 
 for f in BINARY_FLOAT_INTRINSICS
-    @eval @generated function $(f)(x::LVec{N, T}, y::LVec{N, T}) where {N, T <: FloatingTypes}
-        ff = llvm_name($(QuoteNode(f)), N, T)
+    @eval @generated function $(f)(x::T, y::T) where T<:LT{<:FloatingTypes}
+        ff = llvm_name($(QuoteNode(f)), T,)
         return :(
             $(Expr(:meta, :inline));
-            ccall($ff, llvmcall, LVec{N, T}, (LVec{N, T}, LVec{N, T}), x, y)
+            ccall($ff, llvmcall, T, (T, T), x, y)
         )
     end
 end
 
 # pow, powi
-for (f, constraint) in [(:pow, FloatingTypes), (:powi, IntegerTypes)]
-    @eval @generated function $(f)(x::LVec{N, T1}, y::T2) where {N, T1 <: FloatingTypes, T2 <: $constraint}
-        ff = llvm_name($(QuoteNode(f)), N, T1)
+for (f, c) in [(:pow, FloatingTypes), (:powi, IntegerTypes)]
+    @eval @generated function $(f)(x::T, y::T2) where {T <: LT{<:FloatingTypes}, T2 <: $c}
+        ff = llvm_name($(QuoteNode(f)), T)
         return :(
             $(Expr(:meta, :inline));
-            ccall($ff, llvmcall, LVec{N, T1}, (LVec{N, T1}, T2), x, y)
+            ccall($ff, llvmcall, T, (T, T2), x, y)
         )
     end
 end
@@ -283,7 +285,7 @@ end
 ####################
 
 # TODO: Only take pointers here...
-@generated function maskedgather(::Type{LVec{N, T}}, ptrs::Union{LVec{N, Ptr{T}}, LVec{N, Int}},
+@generated function maskedgather(ptrs::LVec{N,Ptr{T}},
                                  mask::LVec{N,Bool}, ::Val{Al}=Val(false)) where {N, T, Al}
     # TODO: Allow setting the passthru
     decl = "declare <$N x $(d[T])> @llvm.masked.gather.$(suffix(N, T))(<$N x $(d[T])*>, i32, <$N x i1>, <$N x $(d[T])>)"
@@ -296,11 +298,11 @@ end
     """
     return :(
         $(Expr(:meta, :inline));
-        Base.llvmcall(($decl, $s), LVec{N, T}, Tuple{typeof(ptrs), LVec{N, Bool}}, ptrs, mask)
+        Base.llvmcall(($decl, $s), LVec{N, T}, Tuple{LVec{N, Ptr{T}}, LVec{N, Bool}}, ptrs, mask)
     )
 end
 
-@generated function maskedscatter(x::LVec{N, T}, ptrs::Union{LVec{N, Int}, LVec{N, Ptr{T}}},
+@generated function maskedscatter(x::LVec{N, T}, ptrs::LVec{N, Ptr{T}},
                                   mask::LVec{N,Bool}, ::Val{Al}=Val(false)) where {N, T, Al}
 
     decl = "declare <$N x $(d[T])> @llvm.masked.scatter.$(suffix(N, T))(<$N x $(d[T])>, <$N x $(d[T])*>, i32, <$N x i1>)"
@@ -313,7 +315,7 @@ end
     """
     return :(
         $(Expr(:meta, :inline));
-        Base.llvmcall(($decl, $s), Cvoid, Tuple{LVec{N, T}, typeof(ptrs), LVec{N, Bool}}, x, ptrs, mask)
+        Base.llvmcall(($decl, $s), Cvoid, Tuple{LVec{N, T}, LVec{N, Ptr{T}}, LVec{N, Bool}}, x, ptrs, mask)
     )
 end
 
@@ -437,42 +439,16 @@ end
 # Bitcast #
 ###########
 
-@generated function bitcast(::Type{LVec{N1, T1}}, x::LVec{N2, T2}) where {N1, T1, N2, T2}
-    sT1, sT2 = sizeof(T1) * 8 * N1, sizeof(T2) * 8 * N2
-    @assert sT1 == sT2 "size of conversion type ($N1 x $T1: $sT1) must be equal to the vector type ($N2 x $T2: $sT2)"
+@generated function bitcast(::Type{T1}, x::T2) where {T1<:LT, T2<:LT}
+    sT1, sT2 = sizeof(T1), sizeof(T2)
+    @assert sT1 == sT2 "size of conversion type ($T1: $sT1) must be equal to the vector type ($T2: $sT2)"
     s = """
-    %2 = bitcast <$(N2) x $(d[T2])> %0 to <$(N1) x $(d[T1])>
-    ret <$(N1) x $(d[T1])> %2
+    %2 = bitcast $(llvm_type(T2)) %0 to $(llvm_type(T1))
+    ret $(llvm_type(T1)) %2
     """
     return :(
         $(Expr(:meta, :inline));
-        Base.llvmcall($s, LVec{N1, T1}, Tuple{LVec{N2, T2}}, x)
-    )
-end
-
-@generated function bitcast(::Type{T1}, x::LVec{N2, T2}) where {T1, N2, T2}
-    sT1, sT2 = sizeof(T1) * 8, sizeof(T2) * 8 * N2
-    @assert sT1 == sT2 "size of conversion type ($T1: $sT1) must be equal to the vector type ($N2 x $T2: $sT2)"
-    s = """
-    %2 = bitcast <$(N2) x $(d[T2])> %0 to $(d[T1])
-    ret $(d[T1]) %2
-    """
-    return :(
-        $(Expr(:meta, :inline));
-        Base.llvmcall($s, T1, Tuple{LVec{N2, T2}}, x)
-    )
-end
-
-@generated function bitcast(::Type{LVec{N1, T1}}, x::T2) where {N1, T1, T2}
-    sT1, sT2 = sizeof(T1) * 8 * N1, sizeof(T2) * 8
-    @assert sT1 == sT2 "size of conversion type ($N1 x $T1: $sT1) must be equal to the vector type ($N2 x $T2: $sT2)"
-    s = """
-    %2 = bitcast $(d[T2]) %0 to <$(N1) x $(d[T1])>
-    ret <$(N1) x $(d[T1])> %2
-    """
-    return :(
-        $(Expr(:meta, :inline));
-        Base.llvmcall($s, LVec{N1, T1}, Tuple{T2}, x)
+        Base.llvmcall($s, T1, Tuple{T2}, x)
     )
 end
 

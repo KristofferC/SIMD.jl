@@ -102,17 +102,16 @@ function valloc(f, ::Type{T}, N::Int, sz::Int) where T
 end
 
 @inline function _get_vec_pointers(a, idx::Vec{N, Int}) where {N}
-    p = Vec{N, Int}(Int(pointer(a)))
-    ptrs = p + (idx - 1) * sizeof(eltype(a))
+    ptrs = pointer(a) + (idx - 1) * sizeof(eltype(a))
 end
 
 # Have to be careful with optional arguments and @boundscheck,
 # see https://github.com/JuliaLang/julia/issues/30411,
 # therefore use @propagate_inbounds
-@inline vgather(::Type{Vec{N,T}}, ptrs::Vec{N, Int},
+@inline vgather(ptrs::Vec{N,Ptr{T}},
                  mask::Vec{N,Bool}=one(Vec{N,Bool}),
                  ::Val{Aligned}=Val(false)) where {N, T<:ScalarTypes, Aligned} =
-    return Vec(LLVM.maskedgather(LLVM.LVec{N, T}, ptrs.data, mask.data))
+    return Vec(LLVM.maskedgather(ptrs.data, mask.data))
 @propagate_inbounds function vgather(a::FastContiguousArray{T,1}, idx::Vec{N, Int},
                                      mask::Vec{N,Bool}=one(Vec{N,Bool}),
                                      ::Val{Aligned}=Val(false)) where {N, T<:ScalarTypes, Aligned}
@@ -121,17 +120,17 @@ end
     end
     GC.@preserve a begin
         ptrs = _get_vec_pointers(a, idx)
-        return vgather(Vec{N, T}, ptrs, mask, Val(Aligned))
+        return vgather(ptrs, mask, Val(Aligned))
     end
 end
-vgathera(a, idx, mask) = vgather(a, idx, mask, Val(true))
-vgathera(a, idx::Vec{N}) where {N} = vgather(a, idx, one(Vec{N,Bool}), Val(true))
+@propagate_inbounds vgathera(a, idx, mask) = vgather(a, idx, mask, Val(true))
+@propagate_inbounds vgathera(a, idx::Vec{N}) where {N} = vgather(a, idx, one(Vec{N,Bool}), Val(true))
 
 @propagate_inbounds Base.getindex(a::FastContiguousArray{T,1}, idx::Vec{N,Int}) where {N,T} =
     vgather(a, idx)
 
 
-@propagate_inbounds vscatter(x::Vec{N,T}, ptrs::Vec{N, Int},
+@propagate_inbounds vscatter(x::Vec{N,T}, ptrs::Vec{N,Ptr{T}},
                              mask::Vec{N,Bool}, ::Val{Aligned}=Val(false)) where {N, T<:ScalarTypes, Aligned} =
     LLVM.maskedscatter(x.data, ptrs.data, mask.data)
 @propagate_inbounds function vscatter(x::Vec{N,T}, a::FastContiguousArray{T,1}, idx::Vec{N, Int},
@@ -142,12 +141,12 @@ vgathera(a, idx::Vec{N}) where {N} = vgather(a, idx, one(Vec{N,Bool}), Val(true)
     end
     GC.@preserve a begin
         ptrs = _get_vec_pointers(a, idx)
-        LLVM.maskedscatter(x.data, ptrs.data, mask.data)
+        vscatter(x, ptrs, mask, Val(Aligned))
     end
     return
 end
-vscattera(x, a, idx, mask) = vscatter(x, a, idx, mask, Val(true))
-vscattera(x, a, idx::Vec{N}) where {N}  = vscatter(x, a, idx, one(Vec{N,Bool}), Val(true))
+@propagate_inbounds vscattera(x, a, idx, mask) = vscatter(x, a, idx, mask, Val(true))
+@propagate_inbounds vscattera(x, a, idx::Vec{N}) where {N}  = vscatter(x, a, idx, one(Vec{N,Bool}), Val(true))
 
 @propagate_inbounds Base.setindex!(a::FastContiguousArray{T,1}, v::Vec{N,T}, idx::Vec{N,Int}) where {N, T} =
     vscatter(v, a, idx)
@@ -257,11 +256,7 @@ Base.@propagate_inbounds function Base.setindex!(
         arr::ContiguousArray{T}, v::Vec{N,T}, idx::VecRange{N},
         args::Vararg{Union{Integer,Vec{N,Bool}}}) where {N,T}
     I, mask = _preprocessindices(arr, idx, args)
-    if mask === nothing
-        vstore(v, _pointer(arr, idx.i, I))
-    else
-        vstore(v, _pointer(arr, idx.i, I), mask)
-    end
+    vstore(v, _pointer(arr, idx.i, I), mask)
     return arr
 end
 
@@ -269,15 +264,15 @@ Base.@propagate_inbounds function Base.getindex(
         arr::ContiguousArray{T}, idx::Vec{N,<:Integer},
         args::Vararg{Union{Integer,Vec{N,Bool}}}) where {N,T}
     I, mask = _preprocessindices(arr, idx, args)
-    ptrs = Int(_pointer(arr, 1, I)) - sizeof(T) + sizeof(T) * idx
-    return vgather(Vec{N,T}, ptrs, mask)
+    ptrs = _pointer(arr, 1, I) - sizeof(T) + sizeof(T) * idx
+    return vgather(ptrs, mask)
 end
 
 Base.@propagate_inbounds function Base.setindex!(
         arr::ContiguousArray{T}, v::Vec{N,T}, idx::Vec{N,<:Integer},
         args::Vararg{Union{Integer,Vec{N,Bool}}}) where {N,T}
     I, mask = _preprocessindices(arr, idx, args)
-    ptrs = Int(_pointer(arr, 1, I)) - sizeof(T) + sizeof(T) * idx
+    ptrs = _pointer(arr, 1, I) - sizeof(T) + sizeof(T) * idx
     vscatter(v, ptrs, mask)
     return arr
 end

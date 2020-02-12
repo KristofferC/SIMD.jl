@@ -1,29 +1,30 @@
-struct Vec{N, T <: ScalarTypes}
+struct Vec{N, T <: VecTypes}
     data::LVec{N, T}
 end
 
 # Constructors
-@inline Vec(v::NTuple{N, T}) where {N, T <: ScalarTypes} = Vec(VE.(v))
-@inline Vec(v::Vararg{T, N}) where {N, T <: ScalarTypes} = Vec(v)
+@inline Vec(v::NTuple{N, T}) where {N, T} = Vec(VE.(v))
+@inline Vec(v::Vararg{T, N}) where {N, T} = Vec(v)
 @inline Vec(v::Vec) = v
 # Numbers defines this and it is needed in power_by_squaring...
 Base.copy(v::Vec) = v
 
 # No throwing versions of convert
 @inline _unsafe_convert(::Type{T}, v) where {T <: IntegerTypes} = v % T
-@inline _unsafe_convert(::Type{T}, v) where {T <: FloatingTypes} = convert(T, v)
+@inline _unsafe_convert(::Type{T}, v) where {T <: VecTypes} = convert(T, v)
 @inline constantvector(v::T1, ::Type{Vec{N, T2}}) where {N, T1, T2} =
     Vec(LLVM.constantvector(_unsafe_convert(T2, v), LLVM.LVec{N, T2}))
 
-@inline Vec{N, T}(v::Vec{N, T}) where {N, T<:IntegerTypes} = v
+@inline Vec{N, T}(v::Vec{N, T}) where {N, T<:VecTypes} = v
 @inline Vec{N, T}(v::Vec{N, T}) where {N, T<:FloatingTypes} = v
-@inline Vec{N, T1}(v::T2) where {N, T1<:ScalarTypes, T2<:ScalarTypes} = constantvector(v, Vec{N, T1})
-@inline Vec{N, T1}(v::Vec{N, T2}) where {N, T1<:IntegerTypes, T2<:IntegerTypes} = convert(Vec{N, T1}, v)
+@inline Vec{N, T1}(v::T2) where {N, T1<:VecTypes, T2<:VecTypes} = constantvector(v, Vec{N, T1})
+@inline Vec{N, T1}(v::Vec{N, T2}) where {N, T1<:Union{IntegerTypes, Ptr}, T2<:Union{IntegerTypes, Ptr}} =
+    convert(Vec{N, T1}, v)
 
 @inline Base.convert(::Type{Vec{N,T}}, v::Vec{N,T}) where {N,T} = v
 @inline function Base.convert(::Type{Vec{N, T1}}, v::Vec{N, T2}) where {T1, T2, N}
-    if T1 <: IntegerTypes
-        if T2 <: IntegerTypes
+    if T1 <: Union{IntegerTypes, Ptr}
+        if T2 <: Union{IntegerTypes, Ptr}
             if sizeof(T1) < sizeof(T2)
                 return Vec(LLVM.trunc(LLVM.LVec{N, T1}, v.data))
             elseif sizeof(T1) == sizeof(T2)
@@ -247,6 +248,19 @@ _signed(::Type{Float64}) = Int64
 @inline Base.signbit(x::Vec{N, T}) where {N, T <:FloatingTypes} =
     signbit(reinterpret(Vec{N, _signed(T)}, x))
 
+# Pointer arithmetic
+for op in (:+, :-)
+    @eval begin
+        # Cast pointer to Int and back
+        @inline Base.$op(x::Vec{N,Ptr{T}}, y::Vec{N,Ptr{T}}) where {N,T} =
+            convert(Vec{N, Ptr{T}}, ($(op)(convert(Vec{N, Int}, x), convert(Vec{N, Int}, y))))
+        @inline Base.$op(x::Vec{N,Ptr{T}}, y::Union{IntegerTypes}) where {N,T} = $(op)(x, Vec{N,Ptr{T}}(y))
+        @inline Base.$op(x::IntegerTypes, y::Union{Vec{N,Ptr{T}}}) where {N,T} = $(op)(y, x)
+
+        @inline Base.$op(x::Vec{N,<:IntegerTypes}, y::Ptr{T}) where {N,T} = $(op)(Vec{N,Ptr{T}}(x), Vec{N,Ptr{T}}(y))
+        @inline Base.$op(x::Ptr{T}, y::Vec{N,<:IntegerTypes}) where {N,T} = $(op)(y, x)
+    end
+end
 
 # Bitshifts
 # See https://github.com/JuliaLang/julia/blob/7426625b5c07b0d93110293246089a259a0a677d/src/intrinsics.cpp#L1179-L1196
@@ -300,23 +314,6 @@ for v in (:<<, :>>, :>>>)
             $v(x, convert(Vec{N, Int}, y))
     end
 end
-
-# Poitner arithmetics between Ptr, IntegerTypes, and vectors of them.
-
-#=
-for op in (:+, :-)
-    @eval begin
-        @inline Base.$op(v1::Vec{N,<:Ptr}, v2::Vec{N,<:IntegerTypes}) where {N} =
-            llvmwrap(Val($(QuoteNode(op))), v1, v2)
-        @inline Base.$op(v1::Vec{N,<:IntegerTypes}, v2::Vec{N,<:Ptr}) where {N} =
-            llvmwrap(Val($(QuoteNode(op))), v1, v2)
-        @inline Base.$op(s1::P, v2::Vec{N,<:IntegerTypes}) where {N,P<:Ptr} =
-            $op(Vec{N,P}(s1), v2)
-        @inline Base.$op(v1::Vec{N,<:IntegerTypes}, s2::P) where {N,P<:Ptr} =
-            $op(v1, Vec{N,P}(s2))
-    end
-end
-=#
 
 # Vectorize binary functions
 for (op, constraint) in [BINARY_OPS;
